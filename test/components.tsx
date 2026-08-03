@@ -1030,7 +1030,9 @@ test('render only new items in static output on final render', t => {
 	// Filter out cursor management escapes (show/hide) to check content writes.
 	// With isTTY=true, cli-cursor writes a show-cursor sequence on unmount.
 	const allWrites = stdout.getWrites();
-	const lastContentWrite = allWrites.findLast(w => !w.startsWith('\u001B[?25'));
+	const lastContentWrite = allWrites.findLast(
+		w => w.length > 0 && !w.startsWith('\u001B[?25'),
+	);
 	t.is(lastContentWrite, 'A\nB\n');
 });
 
@@ -1102,8 +1104,7 @@ test('disable raw mode when all input components are unmounted', async t => {
 
 	const {rerender} = render(
 		<Test renderFirstInput renderSecondInput />,
-		// eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-		options as any,
+		options,
 	);
 
 	t.true(stdin.setRawMode.calledOnce);
@@ -1158,11 +1159,7 @@ test('do not disable raw mode when swapping components that use useInput', async
 		return step === 1 ? <StepA /> : <StepB />;
 	}
 
-	const {rerender} = render(
-		<Test step={1} />,
-		// eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-		options as any,
-	);
+	const {rerender} = render(<Test step={1} />, options);
 
 	t.true(stdin.setRawMode.calledOnce);
 	t.true(stdin.ref.calledOnce);
@@ -1216,11 +1213,7 @@ test('clear pending input parser state when swapping components that use useInpu
 			return step === 1 ? <StepA /> : <StepB />;
 		}
 
-		const {rerender} = render(
-			<Test step={1} />,
-			// eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-			options as any,
-		);
+		const {rerender} = render(<Test step={1} />, options);
 
 		emitReadable(stdin, '\u001B[');
 		rerender(<Test step={2} />);
@@ -1271,11 +1264,7 @@ test('re-ref stdin when input is used after previous unmount', t => {
 	const onSecondMountInput = spy();
 
 	// First render
-	const {unmount} = render(
-		<Test onInput={onFirstMountInput} />,
-		// eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-		options as any,
-	);
+	const {unmount} = render(<Test onInput={onFirstMountInput} />, options);
 
 	t.true(stdin.ref.calledOnce);
 	t.true(stdin.setRawMode.calledOnce);
@@ -1294,8 +1283,7 @@ test('re-ref stdin when input is used after previous unmount', t => {
 	// Second render with new Ink instance reusing the same stdin
 	const {unmount: unmount2} = render(
 		<Test onInput={onSecondMountInput} />,
-		// eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-		options as any,
+		options,
 	);
 
 	t.true(stdin.ref.calledTwice);
@@ -1413,8 +1401,7 @@ test('render different component based on whether stdin is a TTY or not', t => {
 
 	const {rerender} = render(
 		<Test renderFirstInput renderSecondInput />,
-		// eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-		options as any,
+		options,
 	);
 
 	t.false(stdin.setRawMode.called);
@@ -1529,7 +1516,7 @@ test('render only last frame when stdout is not a TTY', async t => {
 	t.false(hasEraseSequence);
 
 	// Verify the final frame is written
-	const lastWrite = allWrites.at(-1) ?? '';
+	const lastWrite = allWrites.findLast(w => w.length > 0) ?? '';
 	t.true(lastWrite.includes('Count: 3'));
 });
 
@@ -1627,7 +1614,7 @@ test('interactive option overrides TTY detection', async t => {
 	t.false(hasEraseSequence);
 
 	// Verify only the final frame is written
-	const lastWrite = allWrites.at(-1) ?? '';
+	const lastWrite = allWrites.findLast(w => w.length > 0) ?? '';
 	t.true(lastWrite.includes('Count: 3'));
 });
 

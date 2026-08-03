@@ -1,7 +1,8 @@
 import process from 'node:process';
+import EventEmitter from 'node:events';
 import vm from 'node:vm';
 import {spawn as spawnProcess} from 'node:child_process';
-import {PassThrough, Writable} from 'node:stream';
+import {PassThrough, Readable, Writable} from 'node:stream';
 import url from 'node:url';
 import * as path from 'node:path';
 import {createRequire} from 'node:module';
@@ -19,7 +20,15 @@ import ansiEscapes from 'ansi-escapes';
 import stripAnsi from 'strip-ansi';
 import boxen from 'boxen';
 import delay from 'delay';
-import {render, Box, Text, useApp, useCursor, useInput} from '../src/index.js';
+import {
+	render,
+	Box,
+	Text,
+	useApp,
+	useCursor,
+	useInput,
+	useStdin,
+} from '../src/index.js';
 import {type RenderMetrics} from '../src/ink.js';
 import {bsu, esu} from '../src/write-synchronized.js';
 import {createStdin, emitReadable} from './helpers/create-stdin.js';
@@ -34,6 +43,131 @@ const require = createRequire(import.meta.url);
 const {spawn} = require('node-pty') as typeof import('node-pty');
 
 const __dirname = url.fileURLToPath(new URL('.', import.meta.url));
+
+const createWritable = (): Writable =>
+	new Writable({
+		write(_chunk, _encoding, callback) {
+			callback();
+		},
+	});
+
+const createCallbackWritableStream = (
+	onWriteCallback: () => void,
+): NodeJS.WritableStream => {
+	const stream = new EventEmitter();
+
+	Object.assign(stream, {
+		writable: true,
+		write(_chunk: string | Uint8Array, callback?: () => void) {
+			setTimeout(() => {
+				onWriteCallback();
+				callback?.();
+			}, 20);
+
+			return true;
+		},
+		end() {
+			return stream;
+		},
+	});
+
+	return stream as unknown as NodeJS.WritableStream;
+};
+
+test.serial(
+	'accepts standard Node streams without stream-specific assertions',
+	async t => {
+		const stdout = createWritable();
+		const stdin = new Readable({
+			read() {},
+		});
+
+		const {unmount, waitUntilExit} = render(<Text>Hello</Text>, {
+			stdout,
+			stdin,
+			stderr: stdout,
+			interactive: true,
+			patchConsole: false,
+		});
+
+		unmount();
+		await waitUntilExit();
+		t.pass();
+	},
+);
+
+test.serial(
+	'reports raw mode as unavailable when a TTY input stream lacks raw mode',
+	async t => {
+		let isRawModeSupported: boolean | undefined;
+
+		const stdin = new Readable({
+			read() {},
+		});
+		Object.defineProperty(stdin, 'isTTY', {value: true});
+
+		function Test() {
+			isRawModeSupported = useStdin().isRawModeSupported;
+			return <Text>Hello</Text>;
+		}
+
+		const stdout = createWritable();
+
+		const {unmount, waitUntilExit} = render(<Test />, {
+			stdout,
+			stdin,
+			interactive: false,
+			patchConsole: false,
+		});
+
+		t.false(isRawModeSupported);
+		unmount();
+		await waitUntilExit();
+	},
+);
+
+test.serial('handles input without requiring process ref methods', async t => {
+	const rawModeChanges: boolean[] = [];
+	let receivedInput = '';
+	const stdin = new Readable({
+		read() {},
+	});
+	Object.defineProperty(stdin, 'isTTY', {value: true});
+	Object.defineProperty(stdin, 'setRawMode', {
+		value(mode: boolean) {
+			rawModeChanges.push(mode);
+		},
+	});
+
+	function Test() {
+		useInput(input => {
+			receivedInput = input;
+		});
+
+		return <Text>Hello</Text>;
+	}
+
+	const stdout = createWritable();
+
+	const {unmount, waitUntilExit} = render(<Test />, {
+		stdout,
+		stdin,
+		interactive: false,
+		patchConsole: false,
+	});
+
+	t.deepEqual(rawModeChanges, [true]);
+	stdin.push('a');
+	await delay(0);
+	t.is(receivedInput, 'a');
+
+	unmount();
+	await new Promise(resolve => {
+		queueMicrotask(resolve);
+	});
+	await waitUntilExit();
+	t.deepEqual(rawModeChanges, [true, false]);
+});
 
 const term = (
 	fixture: string,
@@ -1141,6 +1275,39 @@ test.serial('waitUntilExit resolves after stdout write callback', async t => {
 
 	t.true(writeCallbackFired);
 });
+
+test.serial(
+	'waitUntilRenderFlush waits for generic stdout write callback',
+	async t => {
+		let writeCallbackCount = 0;
+		const stdout = createCallbackWritableStream(() => {
+			writeCallbackCount++;
+		});
+
+		const {unmount, waitUntilExit, waitUntilRenderFlush} = render(
+			<Text>Hello</Text>,
+			{
+				stdout,
+				interactive: false,
+				patchConsole: false,
+			},
+		);
+
+		t.teardown(async () => {
+			unmount();
+			await waitUntilExit();
+		});
+
+		await waitUntilRenderFlush();
+
+		t.is(writeCallbackCount, 1);
+
+		unmount();
+		await waitUntilExit();
+
+		t.is(writeCallbackCount, 3);
+	},
+);
 
 test.serial(
 	'createDelayedWriteCallbackStdout delays only the first matching chunk',
