@@ -11,6 +11,7 @@ import {
 	useStdout,
 	useStderr,
 } from '../src/index.js';
+import {homeAndEraseDown} from '../src/ink.js';
 import {createStdin, emitReadable} from './helpers/create-stdin.js';
 import createStdout from './helpers/create-stdout.js';
 
@@ -783,7 +784,7 @@ for (const {name, incremental} of inkRenderingModes) {
 			await waitUntilRenderFlush();
 
 			const synced = getWriteCalls(stdout).slice(writesBeforeRerender).join('');
-			t.true(synced.includes(ansiEscapes.clearTerminal), 'took the sync path');
+			t.true(synced.includes(homeAndEraseDown), 'took the sync path');
 			// 6 lines with no trailing newline: the cursor is left on row 5, so y=2
 			// is cursorUp(3), not the cursorUp(4) a visible-line-count basis gives.
 			t.true(

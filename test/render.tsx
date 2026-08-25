@@ -29,7 +29,7 @@ import {
 	useInput,
 	useStdin,
 } from '../src/index.js';
-import {type RenderMetrics} from '../src/ink.js';
+import {type RenderMetrics, homeAndEraseDown} from '../src/ink.js';
 import {bsu, esu} from '../src/write-synchronized.js';
 import {createStdin, emitReadable} from './helpers/create-stdin.js';
 import createStdout from './helpers/create-stdout.js';
@@ -308,7 +308,8 @@ type Issue450Fixture =
 	| 'issue-450-shrink-from-fullscreen-rerender'
 	| 'issue-450-shrink-from-overflow-rerender'
 	| 'issue-450-static-shrink-from-fullscreen-rerender'
-	| 'issue-969-windows-full-height-rerender';
+	| 'issue-969-windows-full-height-rerender'
+	| 'issue-935-overflow-rerender';
 
 const runIssue450Fixture = async (
 	fixture: Issue450Fixture,
@@ -373,12 +374,12 @@ const runNonTtyFixture = async (
 
 type Issue450FixtureResult = {
 	output: string;
-	clearTerminalCount: number;
+	fullClearCount: number;
 	eraseLineCount: number;
 };
 
 const getIssue450ControlSequenceCounts = (output: string) => ({
-	clearTerminalCount: countOccurrences(output, ansiEscapes.clearTerminal),
+	fullClearCount: countOccurrences(output, homeAndEraseDown),
 	eraseLineCount: countOccurrences(output, ansiEscapes.eraseLines(1)),
 });
 
@@ -387,12 +388,12 @@ const runIssue450FixtureWithCounts = async (
 	rows = 6,
 ): Promise<Issue450FixtureResult> => {
 	const output = await runIssue450Fixture(fixture, rows);
-	const {clearTerminalCount, eraseLineCount} =
+	const {fullClearCount, eraseLineCount} =
 		getIssue450ControlSequenceCounts(output);
 
 	return {
 		output,
-		clearTerminalCount,
+		fullClearCount,
 		eraseLineCount,
 	};
 };
@@ -474,7 +475,7 @@ function ThrowingComponentWithBoundary() {
 test.serial('do not erase screen', async t => {
 	const ps = term('erase', ['4']);
 	await ps.waitForExit();
-	t.false(ps.output.includes(ansiEscapes.clearTerminal));
+	t.false(ps.output.includes(homeAndEraseDown));
 
 	for (const letter of ['A', 'B', 'C']) {
 		t.true(ps.output.includes(letter));
@@ -487,7 +488,7 @@ test.serial(
 		const ps = term('erase-with-static', ['4']);
 
 		await ps.waitForExit();
-		t.false(ps.output.includes(ansiEscapes.clearTerminal));
+		t.false(ps.output.includes(homeAndEraseDown));
 
 		for (const letter of ['A', 'B', 'C', 'D', 'E', 'F']) {
 			t.true(ps.output.includes(letter));
@@ -531,13 +532,13 @@ test.serial(
 			'Expected the inflate phase to have rendered as its own frame',
 		);
 		t.true(
-			ps.output.includes(ansiEscapes.clearTerminal),
+			ps.output.includes(homeAndEraseDown),
 			'Expected the overflow to have routed a frame through the full-clear path',
 		);
 
 		// The shrink frame's full clear is the last one; the lowercase "live-0"
 		// after it proves shrink and nudge rendered as separate frames.
-		const lastClearIndex = ps.output.lastIndexOf(ansiEscapes.clearTerminal);
+		const lastClearIndex = ps.output.lastIndexOf(homeAndEraseDown);
 		t.false(
 			ps.output.includes('live-4', lastClearIndex),
 			'Expected the last full clear to be the shrink frame, not the inflate frame',
@@ -560,7 +561,7 @@ test.serial(
 test.serial('erase screen', async t => {
 	const ps = term('erase', ['3']);
 	await ps.waitForExit();
-	t.true(ps.output.includes(ansiEscapes.clearTerminal));
+	t.true(ps.output.includes(homeAndEraseDown));
 
 	for (const letter of ['A', 'B', 'C']) {
 		t.true(ps.output.includes(letter));
@@ -572,7 +573,7 @@ test.serial(
 	async t => {
 		const ps = term('erase', ['3']);
 		await ps.waitForExit();
-		t.true(ps.output.includes(ansiEscapes.clearTerminal));
+		t.true(ps.output.includes(homeAndEraseDown));
 
 		for (const letter of ['A', 'B', 'C']) {
 			t.true(ps.output.includes(letter));
@@ -613,7 +614,7 @@ test.serial('erase screen where state changes in small viewport', async t => {
 	const ps = term('erase-with-state-change', ['3']);
 	await ps.waitForExit();
 
-	const frames = ps.output.split(ansiEscapes.clearTerminal);
+	const frames = ps.output.split(homeAndEraseDown);
 	const lastFrame = frames.at(-1);
 
 	for (const letter of ['A', 'B', 'C']) {
@@ -629,7 +630,7 @@ test.serial(
 
 		t.true(ps.output.includes('Bottom line'));
 
-		const lastFrame = ps.output.split(ansiEscapes.clearTerminal).at(-1) ?? '';
+		const lastFrame = ps.output.split(homeAndEraseDown).at(-1) ?? '';
 
 		// Check that the bottom line is at the end without extra newlines
 		// In a 5-line terminal:
@@ -654,7 +655,7 @@ test.serial(
 		const ps = term('issue-442-full-height', [String(rows)]);
 		await ps.waitForExit();
 
-		const lastFrame = ps.output.split(ansiEscapes.clearTerminal).at(-1) ?? '';
+		const lastFrame = ps.output.split(homeAndEraseDown).at(-1) ?? '';
 		const lastFrameContent = stripAnsi(lastFrame);
 		const lines = lastFrameContent.split('\n');
 
@@ -674,13 +675,13 @@ test.serial(
 test.serial(
 	'#450: full-height rerenders should not repeatedly clear terminal',
 	async t => {
-		const {output, clearTerminalCount, eraseLineCount} =
+		const {output, fullClearCount, eraseLineCount} =
 			await runIssue450FixtureWithCounts('issue-450-full-height-rerender');
 
 		assertIssue450DynamicFrameOutput(t, output);
 		t.true(
-			clearTerminalCount <= 1,
-			`Expected at most one clearTerminal sequence, received ${clearTerminalCount}`,
+			fullClearCount <= 1,
+			`Expected at most one full-clear sequence, received ${fullClearCount}`,
 		);
 		t.true(
 			eraseLineCount > 0,
@@ -699,11 +700,8 @@ test.serial(
 		assertIssue450DynamicFrameOutput(t, output);
 		// Windows consoles scroll when the bottom-right cell is written, which
 		// breaks incremental erase for fullscreen frames. Each rerender must fall
-		// back to a full clear there. The fixture process believes it is on
-		// Windows, so ansi-escapes may emit its legacy clearTerminal variant
-		// there (the host's os.release() decides), while this process resolves
-		// the modern one. Count the eraseScreen prefix shared by both variants.
-		const fullClearCount = countOccurrences(output, ansiEscapes.eraseScreen);
+		// back to a full clear there.
+		const fullClearCount = countOccurrences(output, homeAndEraseDown);
 		t.true(
 			fullClearCount >= 2,
 			`Expected a full clear per fullscreen rerender, received ${fullClearCount}`,
@@ -723,7 +721,7 @@ test.serial(
 		);
 
 		t.false(
-			outputBeforeMarker.includes(ansiEscapes.clearTerminal),
+			outputBeforeMarker.includes(homeAndEraseDown),
 			'Initial overflowing render should not clear terminal',
 		);
 	},
@@ -741,24 +739,64 @@ test.serial(
 		);
 
 		t.false(
-			outputBeforeMarker.includes(ansiEscapes.clearTerminal),
+			outputBeforeMarker.includes(homeAndEraseDown),
 			'Initial full-height render should not clear terminal',
 		);
 	},
 );
 
 test.serial(
-	'#450 control: rows - 1 rerenders should avoid clearTerminal',
+	'#450 control: rows - 1 rerenders should avoid a full clear',
 	async t => {
-		const {output, clearTerminalCount, eraseLineCount} =
+		const {output, fullClearCount, eraseLineCount} =
 			await runIssue450FixtureWithCounts('issue-450-height-minus-one-rerender');
 
 		assertIssue450DynamicFrameOutput(t, output);
-		t.is(clearTerminalCount, 0);
+		t.is(fullClearCount, 0);
 		t.true(
 			eraseLineCount > 0,
 			'Expected incremental erase sequences for non-fullscreen rerenders',
 		);
+	},
+);
+
+test.serial(
+	'#935: overflowing rerenders must not erase terminal scrollback',
+	async t => {
+		const rows = 6;
+		const output = await runIssue450Fixture(
+			'issue-935-overflow-rerender',
+			rows,
+		);
+		const {fullClearCount} = getIssue450ControlSequenceCounts(output);
+
+		assertIssue450DynamicFrameOutput(t, output);
+		t.true(
+			fullClearCount >= 2,
+			`Expected a full clear per overflowing rerender, received ${fullClearCount}`,
+		);
+
+		// The fallback may only clear the viewport. CSI 3J erases the terminal's
+		// scrollback and CSI 2J makes VS Code / Windows Terminal push the viewport
+		// into scrollback before clearing, churning bounded history on every frame.
+		t.false(output.includes('\u001B[3J'), 'Must not emit CSI 3J');
+		t.false(output.includes(ansiEscapes.eraseScreen), 'Must not emit CSI 2J');
+		t.false(output.includes(ansiEscapes.clearTerminal));
+
+		const visibleLines = reconstructTerminalLines(output, rows);
+		for (let index = 0; index < rows; index++) {
+			t.true(
+				visibleLines.includes(`#935 scrollback ${index}`),
+				`Pre-existing scrollback line ${index} must survive rerenders`,
+			);
+		}
+
+		// The final viewport shows the last frame, and no stale row survives
+		// anywhere the user can see: frame 7's label is longer than every other
+		// frame's, so a missing or partial clear leaves `STALE-ROW` behind.
+		const viewport = visibleLines.slice(-rows);
+		t.true(viewport.some(line => line.includes('frame 8')));
+		t.false(visibleLines.some(line => line.includes('STALE-ROW')));
 	},
 );
 
@@ -771,11 +809,11 @@ test.serial(
 			'issue-450-full-height-rerender-with-marker',
 			renderedMarker,
 		);
-		const {clearTerminalCount} =
+		const {fullClearCount} =
 			getIssue450ControlSequenceCounts(outputBeforeMarker);
 
 		assertIssue450DynamicFrameOutput(t, outputBeforeMarker);
-		t.is(clearTerminalCount, 0);
+		t.is(fullClearCount, 0);
 	},
 );
 
@@ -788,48 +826,48 @@ test.serial(
 			'issue-450-grow-to-fullscreen-rerender',
 			renderedMarker,
 		);
-		const {clearTerminalCount} =
+		const {fullClearCount} =
 			getIssue450ControlSequenceCounts(outputBeforeMarker);
 
 		assertIssue450DynamicFrameOutput(t, outputBeforeMarker);
-		t.is(clearTerminalCount, 0);
+		t.is(fullClearCount, 0);
 	},
 );
 
 test.serial(
 	'#450: shrink from full-height to rows - 1 should clear exactly once',
 	async t => {
-		const {output, clearTerminalCount} = await runIssue450FixtureWithCounts(
+		const {output, fullClearCount} = await runIssue450FixtureWithCounts(
 			'issue-450-shrink-from-fullscreen-rerender',
 		);
 
 		assertIssue450DynamicFrameOutput(t, output);
-		t.is(clearTerminalCount, 1);
+		t.is(fullClearCount, 1);
 	},
 );
 
 test.serial(
 	'#450: shrink from overflow to rows - 1 should clear exactly once',
 	async t => {
-		const {output, clearTerminalCount} = await runIssue450FixtureWithCounts(
+		const {output, fullClearCount} = await runIssue450FixtureWithCounts(
 			'issue-450-shrink-from-overflow-rerender',
 		);
 
 		assertIssue450DynamicFrameOutput(t, output);
-		t.is(clearTerminalCount, 1);
+		t.is(fullClearCount, 1);
 	},
 );
 
 test.serial(
 	'#450: <Static> with shrink from full-height should clear exactly once',
 	async t => {
-		const {output, clearTerminalCount} = await runIssue450FixtureWithCounts(
+		const {output, fullClearCount} = await runIssue450FixtureWithCounts(
 			'issue-450-static-shrink-from-fullscreen-rerender',
 		);
 
 		t.true(output.includes('#450 static line'));
 		assertIssue450DynamicFrameOutput(t, output);
-		t.is(clearTerminalCount, 1);
+		t.is(fullClearCount, 1);
 	},
 );
 
@@ -865,10 +903,8 @@ test.serial(
 		rerender(<NonTtyRerenderTestComponent frameCount={1} />);
 		rerender(<NonTtyRerenderTestComponent frameCount={2} />);
 
-		const {clearTerminalCount} = getIssue450ControlSequenceCounts(
-			writes.join(''),
-		);
-		t.is(clearTerminalCount, 0);
+		const {fullClearCount} = getIssue450ControlSequenceCounts(writes.join(''));
+		t.is(fullClearCount, 0);
 
 		unmount();
 	},
@@ -902,10 +938,8 @@ test.serial(
 
 		rerender(<NonTtyOverflowTransitionTestComponent lineCount={4} />);
 
-		const {clearTerminalCount} = getIssue450ControlSequenceCounts(
-			writes.join(''),
-		);
-		t.is(clearTerminalCount, 0);
+		const {fullClearCount} = getIssue450ControlSequenceCounts(writes.join(''));
+		t.is(fullClearCount, 0);
 
 		unmount();
 	},
@@ -938,10 +972,8 @@ test.serial(
 		stdout.emit('resize');
 		await delay(0);
 
-		const {clearTerminalCount} = getIssue450ControlSequenceCounts(
-			writes.join(''),
-		);
-		t.is(clearTerminalCount, 1);
+		const {fullClearCount} = getIssue450ControlSequenceCounts(writes.join(''));
+		t.is(fullClearCount, 1);
 
 		unmount();
 	},
@@ -954,7 +986,7 @@ test.serial(
 			'issue-450-grow-to-overflow-rerender',
 			['3'],
 		);
-		t.false(output.includes(ansiEscapes.clearTerminal));
+		t.false(output.includes(homeAndEraseDown));
 	},
 );
 
@@ -986,7 +1018,7 @@ test.serial(
 test.serial(
 	'#450: full-height rerenders with <Static> should not repeatedly clear terminal',
 	async t => {
-		const {output, clearTerminalCount, eraseLineCount} =
+		const {output, fullClearCount, eraseLineCount} =
 			await runIssue450FixtureWithCounts(
 				'issue-450-full-height-with-static-rerender',
 			);
@@ -997,8 +1029,8 @@ test.serial(
 		);
 		assertIssue450DynamicFrameOutput(t, output);
 		t.true(
-			clearTerminalCount <= 1,
-			`Expected at most one clearTerminal sequence, received ${clearTerminalCount}`,
+			fullClearCount <= 1,
+			`Expected at most one full-clear sequence, received ${fullClearCount}`,
 		);
 		t.true(
 			eraseLineCount > 0,
